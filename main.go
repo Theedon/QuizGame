@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/csv"
 	"flag"
 	"fmt"
@@ -11,9 +12,8 @@ import (
 )
 
 var scanner *bufio.Scanner = bufio.NewScanner(os.Stdin)
-var quit chan bool = make(chan bool)
 
-func readFile(filePath *string, score *int) {
+func readFile(filePath *string) [][]string {
 	usageString := "input the file path of the csv file"
 	filePtr := flag.String("file", *filePath, usageString)
 
@@ -32,14 +32,23 @@ func readFile(filePath *string, score *int) {
 		fmt.Println("Error reading records", err)
 	}
 
+	return records
+
+}
+
+func administerTest(ctx context.Context, records [][]string, score *int) {
+
+OuterLoop:
 	for _, record := range records {
 		select {
-		case <-quit:
-			fmt.Println("Time out and Exiting")
-			os.Exit(0)
+		case <-ctx.Done():
+			fmt.Println("Time elapsed...")
+			break OuterLoop
 		default:
 			scoreQuestion(record, score)
+
 		}
+
 	}
 
 	printScore(*score, len(records))
@@ -63,24 +72,27 @@ func printScore(score int, len int) {
 	fmt.Printf("\nFinal Score = %v\nTest Percentage = %.2f\n", score, perc)
 }
 
-func timer(quit chan bool) {
-	timeout := 30
-	time.Sleep(time.Duration(timeout) * time.Second)
-	quit <- true
-}
-
 func main() {
-
-	var filePath string = "problems.csv"
 	var score int = 0
+	var testTime int
+	var filePath string
 
-	go timer(quit)
-	readFile(&filePath, &score)
+	flag.IntVar(&testTime, "time", 30, "input the time")
+	flag.StringVar(&filePath, "path", "problems.csv", "Enter the path to the csv file to be used for quiz")
+	flag.Parse()
 
-	select {
-	case <-quit:
-		fmt.Println("Time up")
-		os.Exit(0)
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(testTime)*time.Second)
+	defer cancel()
+	
+	records := readFile(&filePath)
+	go func() {
+		administerTest(ctx, records, &score)
+	}()
 
+
+
+	<-ctx.Done()
+	fmt.Println("\nTime elapsed...")
+	printScore(score, len(records))
+	os.Exit(0)
 }
